@@ -1,7 +1,7 @@
 # BUT FIT Projects
 A collection of interesting small projects completed as part of various courses during studies at BUT FIT.
 
-Here is a mapping of each project (directory) to their topic. A brief description of each project can be found under the related topic.
+Here is a mapping of each project (directory) to their topic.
 
 | Project name                               | Topic                         |
 |--------------------------------------------|-------------------------------|
@@ -26,7 +26,7 @@ Here is a mapping of each project (directory) to their topic. A brief descriptio
 |`semaphores`                                | Low-level Projects            |
 |`triangular-maze-solver`                    | Low-level Projects            |
 
-What follows is a brief description of each projects grouped by topic.
+What follows is a brief description of each project grouped by topic, related courses and used technologies.
 
 ## Biological Data Analysis
 
@@ -62,15 +62,12 @@ Related Courses:
 Used Technologies: Python, Numpy, Pandas, MongoDB, Neo4j, Docker, Altair AI Studio (formerly RapidMiner), Machine Learning
 
 `car-accidents-analysis`
-<!-- TODO -->
 - Data preparation and statistical analysis of car accident statistics in Czechia in Python.
 
 `diabetic-data-analysis`
-<!-- TODO -->
 - Simple data mining tasks from statistics about patients with diabetes from USA. Preparation and analysis performed using RapidMiner.
 
 `no-sql-demonstration`
-<!-- TODO -->
 - Python scripts demonstrating simple setup, usage and data queries in NoSQL technologies, such as MongoDB and Neo4j.
 
 ## Low-level Projects (written mostly in C)
@@ -85,7 +82,7 @@ Related Courses:
 Used Technologies: C, Shell, UNIX knowledge
 
 `binary-code-analysis`
-- Simplified version of `readelf -l`, printing ELF program headers (segments) and listing the sections that belong to each segment. Uses the libelf and gelf APIs to parse and inspect ELF binaries, displaying segment types and permissions.
+- Simplified version of `readelf -l`, printing ELF program headers (segments) and listing the sections that belong to each segment. Uses the `libelf` and `gelf` APIs to parse and inspect ELF binaries, displaying segment types and permissions.
 - Reports analyzing a Linux kernel panic using the `crash` utility and a captured `vmcore` dump.
 
 `bitvector-steganography`
@@ -96,7 +93,7 @@ Used Technologies: C, Shell, UNIX knowledge
 - Shell script that recursively analyzes a directory tree, counts files and directories, and generates a file size histogram (with optional normalized ASCII bar chart), ignoring files matching an optional regex. Supports human-readable output and handles unreadable files gracefully.
 
 `hash-table-implementation`
-- Implementation of the `tail` utility in C that prints the last lines of a file (with optional `line count` parameter).
+- Implementation of the UNIX `tail` utility in C.
 - Program that counts word frequencies in the input text using a custom modular hash table library (`libhtab`) provided as both a static and shared version.
 
 `semaphores`
