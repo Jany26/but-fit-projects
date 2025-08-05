@@ -1,0 +1,7 @@
+numpy
+pandas
+pymongo
+cassandra-driver
+neo4j
+influxdb
+

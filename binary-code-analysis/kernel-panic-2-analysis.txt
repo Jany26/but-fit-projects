@@ -1,0 +1,258 @@
+# 3. projekt do predmetu IAN (2022)
+# Vypracovali:
+# Eduard Frlička  (xfrlic00@stud.fit.vutbr.cz)
+# Ján Maťufka     (xmatuf00@stud.fit.vutbr.cz)
+
+Najprv sme sa pokúšali zistiť dôvod vzniku kernel panic.
+
+-------------------------------------------------------------------------------
+crash> bt
+PID: 42     TASK: ff47e40b7fac5ac0  CPU: 2   COMMAND: "khungtaskd"
+ #0 [ff7ea329804a3d28] machine_kexec at ffffffff89e635ce
+ #1 [ff7ea329804a3d80] __crash_kexec at ffffffff89f9d6bd
+ #2 [ff7ea329804a3e48] panic at ffffffff89eeb227
+ #3 [ff7ea329804a3ec8] watchdog at ffffffff89fd355f
+ #4 [ff7ea329804a3f10] kthread at ffffffff89f0e906
+ #5 [ff7ea329804a3f50] ret_from_fork at ffffffff8a80023f
+-------------------------------------------------------------------------------
+
+Kernel panic vyvolal proces "khungtaskd". Je to nejaké vlákno kernelu, 
+ktoré periodicky (120 sek.) prechádza všetky procesy a ukončuje tie, 
+ktoré majú nastavený TASK_UNINTERRUPTIBLE príznak (teda nedajú sa jednoducho 
+plánovať) a "visia", resp. čakajú na nejaký zdroj dlhšie ako dĺžka danej 
+periódy. Zároveň mal OS nastavený príznak, že pri vypnutí procesu týmto khungtaskd
+procesom sa spustí kernel panic.
+
+Skúsime sa teda pozrieť do logov systému a zistiť, čo sa stalo tesne pred touto
+situáciou.
+
+-------------------------------------------------------------------------------
+crash> log
+...
+[   51.555322] smajdalf: loading out-of-tree module taints kernel.
+[   51.555903] smajdalf: module license 'RH-EDU' taints kernel.
+[   51.556426] Disabling lock debugging due to kernel taint
+[   51.556949] smajdalf: module verification failed: signature and/or required key missing - tainting kernel
+[   51.558281] Smajdalf: Carodej nikdy nechodi pozde.
+[  245.808706] INFO: task systemd:1 blocked for more than 120 seconds.
+[  245.809290]       Tainted: P           OE    --------- -  - 4.18.0-348.12.2.el8_5.x86_64 #1
+[  245.810057] "echo 0 > /proc/sys/kernel/hung_task_timeout_secs" disables this message.
+[  245.810779] task:systemd         state:D stack:    0 pid:    1 ppid:     0 flags:0x00000000
+...
+-------------------------------------------------------------------------------
+
+Z logu vidíme, že watchdog (khungtaskd) vyvolal kernel panic, pretože systemd
+bol zablokovaný a na niečo čakal viac ako dĺžka periódy (default = 120 sekúnd). 
+Skúsime si teda vypísať backtrace systemd (ten má PID 1).
+
+-------------------------------------------------------------------------------
+crash> bt 1
+PID: 1      TASK: ff47e40b01891e40  CPU: 2   COMMAND: "systemd"
+ #0 [ff7ea32980327d88] __schedule at ffffffff8a77a2ad
+ #1 [ff7ea32980327e18] schedule at ffffffff8a77a787
+ #2 [ff7ea32980327e28] rwsem_down_read_slowpath at ffffffff8a77d320
+ #3 [ff7ea32980327ec0] __do_page_fault at ffffffff89e75121
+ #4 [ff7ea32980327f20] do_page_fault at ffffffff89e75267
+ #5 [ff7ea32980327f50] page_fault at ffffffff8a80111e
+    RIP: 00007f2411c4e27f  RSP: 00007fff58f62300  RFLAGS: 00010206
+    RAX: 000055c2b6810bf0  RBX: 00007f2411f89bc0  RCX: 000055c2b67f67c0
+    RDX: 00007f2411f89c50  RSI: 00007f2411f89c40  RDI: 00007f2411f89bc8
+    RBP: 000000000000001d   R8: 000055c2b66515f0   R9: 000055c2b66515e0
+    R10: 00007f2411f89bc0  R11: 0000000000000007  R12: 0000000000000003
+    R13: 000000000000001d  R14: 00007f2411f89bc0  R15: 0000000000000030
+    ORIG_RAX: ffffffffffffffff  CS: 0033  SS: 002b
+-------------------------------------------------------------------------------
+
+Tu vidíme, že backtrace spomína funkciu rwsem_down_read_slowpath. 
+Z jej názvu sme usúdili, že sa čaká na nejaký semafór.
+
+Vypíšeme si disassembly volania funkcie rwsem_down_read_slowpath.
+
+-------------------------------------------------------------------------------
+crash> dis -r ffffffff89e75121 5
+0xffffffff89e7510f <__do_page_fault+927>:       testb  $0x3,0x88(%rbp)
+0xffffffff89e75116 <__do_page_fault+934>:       je     0xffffffff89e7515f <__do_page_fault+1007>
+0xffffffff89e75118 <__do_page_fault+936>:       mov    (%rsp),%rdi
+0xffffffff89e7511c <__do_page_fault+940>:       callq  0xffffffff8a77d390 <down_read>
+0xffffffff89e75121 <__do_page_fault+945>:       jmpq   0xffffffff89e74ede <__do_page_fault+366>
+-------------------------------------------------------------------------------
+
+Tu vidíme, že prvý argument volania funkcie down_read vieme 
+vyčítať zo stacku, keďže sa tam predal zo stacku.
+(rsp -> rdi, rdi je prvý argument, viď. System V ABI)
+
+Hodnoty na zásobníku pri volaní funkcií z call stacku si vieme zistiť nasledovne:
+
+-------------------------------------------------------------------------------
+crash> bt -f 1
+PID: 1      TASK: ff47e40b01891e40  CPU: 2   COMMAND: "systemd"
+ #0 [ff7ea32980327d88] __schedule at ffffffff8a77a2ad
+    ff7ea32980327d90: ff47e40b01892890 0000000000000000 
+    ff7ea32980327da0: ff47e40b018ebc80 ff47e40b01891e40 
+    ff7ea32980327db0: ff47e40b7fb2a1c0 ff7ea32980327e10 
+    ff7ea32980327dc0: ffffffff8a77a2ad ff7ea32980327ea0 
+    ff7ea32980327dd0: ff47e40b07531f00 ff47e40b00000004 
+    ff7ea32980327de0: 1959a3c6aa7d1200 ff47e40b01891e40 
+    ff7ea32980327df0: 0000000000000002 0000000000000000 
+    ff7ea32980327e00: 0000000000000000 ff47e40b340bec78 
+    ff7ea32980327e10: ff7ea32980327eb8 ffffffff8a77a787 
+ #1 [ff7ea32980327e18] schedule at ffffffff8a77a787
+    ff7ea32980327e20: ff47e40b340bec70 ffffffff8a77d320 
+ #2 [ff7ea32980327e28] rwsem_down_read_slowpath at ffffffff8a77d320
+    ff7ea32980327e30: 765a1ed8ea031014 ff47e40b340bec78 
+    ff7ea32980327e40: ff47e40b340bec88 0000000000000000 
+    ff7ea32980327e50: 0000000000000001 ff7ea32980327e50 
+    ff7ea32980327e60: ff7ea329809ffd70 ff47e40b340bec78 
+    ff7ea32980327e70: ff47e40b01891e40 0000000000000001 
+    ff7ea32980327e80: 00000000fffcdd63 1959a3c6aa7d1200 
+    ff7ea32980327e90: 0000000000000007 000055c2b6810c00 
+    ff7ea32980327ea0: 0000000000000255 ff47e40b340bec00 
+    ff7ea32980327eb0: ff47e40b01891e40 ff7ea32980327f58 
+    ff7ea32980327ec0: ffffffff89e75121 
+ #3 [ff7ea32980327ec0] __do_page_fault at ffffffff89e75121
+    ff7ea32980327ec8: ff47e40b340bec70 0000000000000000 <<<< zaujíma nás tento riadok, konkrétne hodnota vľavo: ff47e40b340bec70 (vrchol zásobníka)
+    ff7ea32980327ed8: 0000000000000000 0000000000000002 
+    ff7ea32980327ee8: 0000000000000000 0000000000000000 
+    ff7ea32980327ef8: ff7ea32980327f58 000055c2b6810c00 
+    ff7ea32980327f08: 0000000000000007 0000000000000000 
+    ff7ea32980327f18: 0000000000000000 ffffffff89e75267 
+ #4 [ff7ea32980327f20] do_page_fault at ffffffff89e75267
+    ff7ea32980327f28: 0000000000000000 0000000000000000 
+    ff7ea32980327f38: ffffffff8a801108 0000000000000000 
+    ff7ea32980327f48: 0000000000000000 ffffffff8a80111e 
+ #5 [ff7ea32980327f50] page_fault at ffffffff8a80111e
+    RIP: 00007f2411c4e27f  RSP: 00007fff58f62300  RFLAGS: 00010206
+    RAX: 000055c2b6810bf0  RBX: 00007f2411f89bc0  RCX: 000055c2b67f67c0
+    RDX: 00007f2411f89c50  RSI: 00007f2411f89c40  RDI: 00007f2411f89bc8
+    RBP: 000000000000001d   R8: 000055c2b66515f0   R9: 000055c2b66515e0
+    R10: 00007f2411f89bc0  R11: 0000000000000007  R12: 0000000000000003
+    R13: 000000000000001d  R14: 00007f2411f89bc0  R15: 0000000000000030
+    ORIG_RAX: ffffffffffffffff  CS: 0033  SS: 002b
+-------------------------------------------------------------------------------
+
+Z kódu kernelu si nájdeme definíciu funkcie down_read:
+
+-------------------------------------------------------------------------------
+/*
+ * lock for reading
+ */
+void __sched down_read(struct rw_semaphore *sem)
+{
+    might_sleep();
+    rwsem_acquire_read(&sem->dep_map, 0, 0, _RET_IP_);
+
+    LOCK_CONTENDED(sem, __down_read_trylock, __down_read);
+}
+EXPORT_SYMBOL(down_read);
+-------------------------------------------------------------------------------
+
+Prvý argument je typu struct rw_semaphore *. Poznáme teda adresu aj typ tohto zámku.
+Vypíšeme si teda bližšie informácie o tomto semafóre.
+
+-------------------------------------------------------------------------------
+crash> struct rw_semaphore ff47e40b340bec70
+struct rw_semaphore {
+  ...
+  {
+    owner = {
+      counter = -51822134688203648
+    }, 
+    rh_kabi_hidden_39 = {
+      owner = 0xff47e40b06683c80
+    }, 
+    {<No data fields>}
+  }
+}
+-------------------------------------------------------------------------------
+
+Vidíme, že vlastník (nejaký proces) tohto semafóra je na adrese 0xff47e40b06683c80.
+
+-------------------------------------------------------------------------------
+crash> ps 0xff47e40b06683c80
+   PID    PPID  CPU       TASK        ST  %MEM     VSZ    RSS  COMM
+   1706   1705   0  ff47e40b06683c80  UN   0.2  236036   3984  bash
+-------------------------------------------------------------------------------
+
+Jedná sa o proces s PID 1706. Zistíme si backtrace tohto procesu.
+
+-------------------------------------------------------------------------------
+crash> bt 1706
+PID: 1706   TASK: ff47e40b06683c80  CPU: 0   COMMAND: "bash"
+ #0 [ff7ea32980ae7d30] __schedule at ffffffff8a77a2ad
+ #1 [ff7ea32980ae7dc0] schedule at ffffffff8a77a787
+ #2 [ff7ea32980ae7dd0] schedule_preempt_disabled at ffffffff8a77aaca
+ #3 [ff7ea32980ae7dd8] __mutex_lock at ffffffff8a77c7c5
+ #4 [ff7ea32980ae7e68] take_the_lock_of_power at ffffffffc0922048 [smajdalf]
+ #5 [ff7ea32980ae7e78] proc_sys_call_handler at ffffffff8a1be885
+ #6 [ff7ea32980ae7ed0] vfs_write at ffffffff8a130955
+ #7 [ff7ea32980ae7f00] ksys_write at ffffffff8a130bcf
+ #8 [ff7ea32980ae7f38] do_syscall_64 at ffffffff89e042bb
+ #9 [ff7ea32980ae7f50] entry_SYSCALL_64_after_hwframe at ffffffff8a8000ad
+    RIP: 00007f511d8a1648  RSP: 00007fffc07911b8  RFLAGS: 00000246
+    RAX: ffffffffffffffda  RBX: 0000000000000002  RCX: 00007f511d8a1648
+    RDX: 0000000000000002  RSI: 00005651e8df2ae0  RDI: 0000000000000001
+    RBP: 00005651e8df2ae0   R8: 000000000000000a   R9: 00007f511d934620
+    R10: 000000000000000a  R11: 0000000000000246  R12: 00007f511db746e0
+    R13: 0000000000000002  R14: 00007f511db6f880  R15: 0000000000000002
+    ORIG_RAX: 0000000000000001  CS: 0033  SS: 002b
+-------------------------------------------------------------------------------
+
+Odtiaľ nás zaujala funkcia take_the_lock_of_power, 
+ktorá pochádza z už spomínaného modulu smajdalf.
+
+-------------------------------------------------------------------------------
+crash> dis -f take_the_lock_of_power
+0xffffffffc0922000 <take_the_lock_of_power>:    nopl   0x0(%rax,%rax,1) [FTRACE NOP]
+0xffffffffc0922005 <take_the_lock_of_power+5>:  mov    -0x35508fcc(%rip),%rax        # 0xffffffff8b419040
+0xffffffffc092200c <take_the_lock_of_power+12>: push   %rbx
+0xffffffffc092200d <take_the_lock_of_power+13>: cmp    $0xffffffff8b419040,%rax
+0xffffffffc0922013 <take_the_lock_of_power+19>: je     0xffffffffc092201e <take_the_lock_of_power+30>
+0xffffffffc0922015 <take_the_lock_of_power+21>: cmpl   $0x1,0x100(%rax)
+0xffffffffc092201c <take_the_lock_of_power+28>: je     0xffffffffc092204c <take_the_lock_of_power+76>
+0xffffffffc092201e <take_the_lock_of_power+30>: mov    $0x9502f8ff,%ebx
+0xffffffffc0922023 <take_the_lock_of_power+35>: pause  
+0xffffffffc0922025 <take_the_lock_of_power+37>: callq  0xffffffff8a77a850 <_cond_resched>
+0xffffffffc092202a <take_the_lock_of_power+42>: sub    $0x1,%rbx
+0xffffffffc092202e <take_the_lock_of_power+46>: jne    0xffffffffc0922023 <take_the_lock_of_power+35>
+0xffffffffc0922030 <take_the_lock_of_power+48>: mov    $0xffffffffc0924100,%rdi
+0xffffffffc0922037 <take_the_lock_of_power+55>: callq  0xffffffff8a77c9c0 <mutex_lock>
+0xffffffffc092203c <take_the_lock_of_power+60>: mov    $0xffffffffc0924100,%rdi
+0xffffffffc0922043 <take_the_lock_of_power+67>: callq  0xffffffff8a77c9c0 <mutex_lock>
+0xffffffffc0922048 <take_the_lock_of_power+72>: xor    %eax,%eax
+0xffffffffc092204a <take_the_lock_of_power+74>: pop    %rbx
+0xffffffffc092204b <take_the_lock_of_power+75>: retq   
+0xffffffffc092204c <take_the_lock_of_power+76>: mov    0x50(%rax),%rdi
+0xffffffffc0922050 <take_the_lock_of_power+80>: add    $0x70,%rdi
+0xffffffffc0922054 <take_the_lock_of_power+84>: callq  0xffffffff8a77cf30 <down_write>
+0xffffffffc0922059 <take_the_lock_of_power+89>: jmp    0xffffffffc092201e <take_the_lock_of_power+30>
+-------------------------------------------------------------------------------
+
+Ručnou analýzou sme zistili, že skok (je) na adrese take_the_lock_of_power+19
+sa nevykoná, pretože rax obsahuje hodnotu ff47e40b01892640 (crash> rd 0xffffffff8b419040),
+čo nie je rovné hodnote $0xffffffff8b419040.
+
+Register rax obsahuje hodnotu ff47e40b01892640 a k tomuto keď prirátame offset 0x100,
+dostaneme adresu ff47e40b01892740.
+
+-------------------------------------------------------------------------------
+crash> rd ff47e40b01892740
+ff47e40b01892740:  0000000100000001                    ........
+-------------------------------------------------------------------------------
+
+Keďže inštrukcia cmpl porovnáva len spodných 32 bitov, zaujíma nás len spodných 8 hex čísel.
+To dá hodnotu 1. A preto sa vďaka inštrukcii cmpl na adrese <take_the_lock_of_power+21> 
+vykoná skok na adrese <take_the_lock_of_power+28>.
+
+Skočíme teda na <take_the_lock_of_power+76>. 
+Do rdi sa vloží hodnota z adresy ff47e40b01892690 (= rax + 0x50), čo je:
+
+-------------------------------------------------------------------------------
+crash> rd ff47e40b01892690
+ff47e40b01892690:  ff47e40b340bec00                    ...4..G.
+-------------------------------------------------------------------------------
+
+Inštrukcia na adrese <take_the_lock_of_power+80> pripočíta k rdi 0x70, 
+teda finálna hodnota v registri rdi pri volaní funkcie down_write bude:
+0xff47e40b340bec00 + 0x70 = 0xff47e40b340bec70
+
+Toto je presne adresa už spomenutého semafóru, na ktorý čakal systemd.

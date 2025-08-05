@@ -1,0 +1,75 @@
+#### Stručně odpovězte na následující otázky: ######
+
+
+1. Byla "Line" vektorizace časově efektivní? Proč?
+==============================================================================
+V porovnaní s "Ref" určite áno. Prehodenie vnútorných cyklov výpočtu umožnilo
+vektorizovať vykonávanie výpočtu nad každou bunkou riadka.
+Samotná vektorizácia potom umožňuje prácu na viacerých prvkoch poľa naraz.
+Takéto prehodenie cyklov síce umožnilo spracovávanie po riadkoch,
+ale zároveň by to spôsobilo, že sa mnoho iterácií vykonávalo "zbytočne".
+Inak povedané, pre každú bunku sa vykoná 'limit' iterácií, aj keď všetky
+bunky riadka mali jasne určený výsledok napríklad už po 2 iteráciách.
+
+Tomuto problému sa predišlo zavedením poľa príznakov, ktoré sa nastavili na
+'true' v momente, keď výpočet hodnoty pre danú bunku už mal jasný výsledok,
+čím sa zabránilo opakovanému prepisovaniu hodnôt vo výslednej matici.
+Zároveň bolo pridané počítadlo už spracovaných buniek a keď po niektorej
+iterácii bolo rovné šírke riadka, mohol sa výpočet pustiť do ďalšieho riadka.
+
+
+2. Jaká byla dosažena výkonnost v Intel Advisoru pro jednotlivé implementace 
+(v GFLOPS)?
+==============================================================================
+
+calculator                  | ref    | line   | batch  
+--------+-------------------+--------+--------+--------
+GFLOPS  | inner loop        | 0.694  | 29.843 | 69.006 
+        | overall (summary) | 2.21   | 19.09  | 25.56  
+--------+-------------------+--------+--------+--------
+GINTOPS | inner loop        | 0.59   | 1.49   | 8.70   
+        | overall (summary) | 0.59   | 1.49   | 5.32   
+
+
+3. Jaká část kódu byla vektorizována v "Line" implementaci? Vyčteme tuto 
+informaci i u batch kalkulátoru?
+==============================================================================
+V "Line" implementácii sa vektorizoval vnútorný cyklus (začiatok: riadok 82).
+V neposlednom rade sa jedná aj o pomocný cyklus, ktorý začína  na riadku 71,
+ktorý iba pripravuje dáta do pomocných polí.
+
+V "Batch" implementácii to tiež vieme vyčítať. Tam nás zaujíma hlavne
+vektorizácia cyklu so začiatkom na riadku 90.
+
+Tieto informácie sú dané červeným bodom z analýzy roofline modelu, takisto sa 
+dajú vyčítať aj z .optrpt súborov.
+
+
+4. Co vyčteme z Roofline modelu pro obě vektorizované implementace?
+==============================================================================
+a) "Line" (0.391 FLOP/B) aj "Batch" (0.357 FLOP/B) majú vyššiu aritmetickú
+intenzitu ako "Ref" (0.167 FLOP/B).
+Zaujímavým faktom je, že "Line" má vyššiu aritmetickú intenzitu, hoci výpočty
+trvajú dlhšie. To ale bude spôsobené tým, že Batch spracováva dáta po menších
+dávkach, zároveň to umožňuje preskočiť väčšiu porciu zbytočných výpočtov.
+
+b) U oboch implementácií sme niekoľkonásobne prekročili peak skalárneho
+sčítania (Scalar ADD peak = cca 6.5 GFLOPS),
+"Line" skoro 5-násobne, "Batch" viac než 10-násobne.
+
+c) Program je brzdený rýchlosťou pamäte, akurát pre rôzne implemnentácie je
+to rôzna pamäť.
+"Ref" je brzdené rýchlosťou DRAM.
+"Line" je brzdené rýchlosťou L2 cache.
+"Batch" je dokonca nad L2 bandwidth a je teda blokovaný len L1 cache bandwidth.
+Zároveň "Batch" takmer dosiahol SP Add Vector Peak (čo je necelých 80 GFLOPS).
+
+
+Dodatok:
+==============================================================================
+GFLOPS (otázka 2) jednotlivých implementácií sa dal samozrejme zvýšiť,
+napríklad obmedzením tzv. 'early exitov' a podobne.
+Avšak to by potom zvýšilo celkové trvanie výpočtu.
+Keďže charakter danej úlohy pripúšťa, že rôzne bunky majú rôzny "užitočný"
+počet iterácií, rýchlosti výpočtu som dal vyššiu prioritu než efektivite
+vektorizácie.

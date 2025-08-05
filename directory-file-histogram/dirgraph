@@ -1,0 +1,196 @@
+#!/bin/sh
+export POSIXLY_CORRECT=yes
+
+##############################################################
+##  file:           dirgraph                                ##
+##  purpose:        IOS-DU1                                 ##
+##  author:         Ján Maťufka, 1BIT FIT VUT               ##
+##  login:          xmatuf00                                ##
+##  last update:    2020-03-31                              ##
+##############################################################
+
+#set -u
+#set -x
+#set -v
+
+proper_usage="Proper script usage: ./dirgraph [-i FILE_ERE] [-n] [DIR]"
+dir=$(pwd)
+dir_or_file_name=""
+regex_to_ignore=""
+normalize=0
+
+##############################################################
+##  OPTION SETTING                                          ##
+##############################################################
+
+while getopts "i:n" OPTION; do
+	case "$OPTION" in
+		i)
+			regex_to_ignore="$OPTARG"
+			;;
+		:)
+			echo "Option -$OPTARG needs an argument. $proper_usage" >&2
+			exit 1
+			;;
+		n)
+			normalize=1
+			;;
+		?)
+			echo "Invalid option. $proper_usage" >&2
+			exit 1
+			;;
+	esac
+done
+
+##############################################################
+##  ERROR HANDLING                                          ##
+##############################################################
+
+shift "$((OPTIND - 1))"
+
+if [ -n "$1" ];  then
+	dir="$1"
+fi
+
+if [ $# -gt 1 ]; then
+	echo "Too many arguments. $proper_usage" >&2
+	exit 1
+fi
+
+# [FILE_ERE] can not match root directory
+
+if [ -n "$regex_to_ignore" ]; then
+	if [ "$(echo "$dir" | grep -E "$regex_to_ignore")" != "" ]; then
+		echo "FILE_ERE can not match root directory"
+		exit 1
+	fi
+fi
+
+nd=0
+nf=0
+
+files_size_1=0  # number of files with size < 100 B
+files_size_2=0  # number of files with size < 1 KiB
+files_size_3=0  # number of files with size < 10 KiB
+files_size_4=0  # number of files with size < 100 KiB
+files_size_5=0  # number of files with size < 1 MiB
+files_size_6=0  # number of files with size < 10 MiB
+files_size_7=0  # number of files with size < 100 MiB
+files_size_8=0  # number of files with size < 1 GiB
+files_size_9=0  # number of files with size >= 1 GiB
+
+# changing internal field separator to contain only '\n' (for parsing find output)
+# (based on Standard save-and-restore taken from "The Unix Programming Environment" by Kernighan and Pike)
+OLD_IFS="$IFS" # save IFS value
+IFS="
+" # this string contains only \n, thus the main algorithm will ignore spaces and \t in the filenames
+
+##############################################################
+##  DIRECTORY EXPLORING                                     ##
+##############################################################
+
+for dir_or_file_name in $(find -L "$dir" -type d -or -type f 2>/dev/null)
+do
+	# branch for ignoring files matching FILE_ERE (regex_to_ignore)
+	if [ -n "$regex_to_ignore" ]; then
+		if [ "$(echo "$dir_or_file_name" | grep -E "$regex_to_ignore")" != "" ]; then
+	        continue
+	    fi
+	fi
+
+	if [ ! -r "${dir_or_file_name}" ];  then
+		# if the file is not readable, then 
+		echo "$dir_or_file_name is not readable, thus will be ignored" >&2
+		exit 1 
+	elif [ -d "${dir_or_file_name}" ]; then
+		nd=$((nd + 1))
+	elif [ -f "${dir_or_file_name}" ]; then 
+		# incrementing 
+		nf=$((nf + 1))
+		file_size=$(wc -c <"$dir_or_file_name")
+		if   [ "$file_size" -lt 100 ]; then files_size_1=$((files_size_1 + 1))
+		elif [ "$file_size" -lt 1024 ]; then files_size_2=$((files_size_2 + 1))
+		elif [ "$file_size" -lt 10240 ]; then files_size_3=$((files_size_3 + 1))	
+		elif [ "$file_size" -lt 102400 ]; then files_size_4=$((files_size_4 + 1))
+		elif [ "$file_size" -lt 1048576 ]; then files_size_5=$((files_size_5 + 1))
+		elif [ "$file_size" -lt 10485760 ]; then files_size_6=$((files_size_6 + 1))
+		elif [ "$file_size" -lt 104857600 ]; then files_size_7=$((files_size_7 + 1))
+		elif [ "$file_size" -lt 1073741824 ]; then files_size_8=$((files_size_8 + 1))
+		elif [ "$file_size" -ge 1073741824 ]; then files_size_9=$((files_size_9 + 1))
+		fi
+	fi
+done
+
+IFS="$OLD_IFS" # restore IFS value 
+
+##############################################################
+##  OUTPUT NORMALIZING (OPTIONAL)                           ##
+##############################################################
+
+if [ "$normalize" -eq 1 ]; then
+	
+	max_hashes_on_line=80 # setting the max output width (default = 80)
+
+	# if output is on terminal, then change max output width to terminal width
+	if [ -t 1 ]; then max_hashes_on_line=$(tput cols); fi 
+
+	# number of printed hashes should account for everything printed on the line until this point
+	# 12 characters - eg. "  <100 B  : "
+	# and should leave 1 character at the end of the line unprinted
+	max_hashes_on_line=$((max_hashes_on_line - 13))
+
+	# finding the largest category of files
+	max_category="$files_size_1"
+	if [ "$max_category" -lt "$files_size_2" ]; then max_category="$files_size_2"; fi
+	if [ "$max_category" -lt "$files_size_3" ]; then max_category="$files_size_3"; fi
+	if [ "$max_category" -lt "$files_size_4" ]; then max_category="$files_size_4"; fi
+	if [ "$max_category" -lt "$files_size_5" ]; then max_category="$files_size_5"; fi
+	if [ "$max_category" -lt "$files_size_6" ]; then max_category="$files_size_6"; fi
+	if [ "$max_category" -lt "$files_size_7" ]; then max_category="$files_size_7"; fi
+	if [ "$max_category" -lt "$files_size_8" ]; then max_category="$files_size_8"; fi
+	if [ "$max_category" -lt "$files_size_9" ]; then max_category="$files_size_9"; fi
+
+	# determining if normalizing is needed
+	if [ "$max_category" -gt "$max_hashes_on_line" ]; then
+		# to prevent bad approximation, the amount of hashes per line is calculated with .001 precision
+		files_per_hash=$(((max_category * 1000) /  max_hashes_on_line)) # the actual amount would be 1000x smaller
+		files_size_1=$(((files_size_1 * 1000) / files_per_hash))
+		files_size_2=$(((files_size_2 * 1000) / files_per_hash))
+		files_size_3=$(((files_size_3 * 1000) / files_per_hash))
+		files_size_4=$(((files_size_4 * 1000) / files_per_hash))
+		files_size_5=$(((files_size_5 * 1000) / files_per_hash))
+		files_size_6=$(((files_size_6 * 1000) / files_per_hash))
+		files_size_7=$(((files_size_7 * 1000) / files_per_hash))
+		files_size_8=$(((files_size_8 * 1000) / files_per_hash))
+		files_size_9=$(((files_size_9 * 1000) / files_per_hash))
+	fi
+fi
+
+##############################################################
+##  OUTPUT PRINTING                                         ##
+##############################################################
+
+hash_print()
+{
+    i=0
+	while [ $i -lt "$1" ]; do
+	printf "#"
+	i=$((i + 1))
+	done
+}
+
+echo Root directory: "$dir"
+echo Directories: "$nd"
+echo All files: "$nf"
+echo File size histogram:
+echo "  <100 B  : $(hash_print $files_size_1)" 
+echo "  <1 KiB  : $(hash_print $files_size_2)"
+echo "  <10 KiB : $(hash_print $files_size_3)"
+echo "  <100 KiB: $(hash_print $files_size_4)"
+echo "  <1 MiB  : $(hash_print $files_size_5)"
+echo "  <10 MiB : $(hash_print $files_size_6)"
+echo "  <100 MiB: $(hash_print $files_size_7)"
+echo "  <1 GiB  : $(hash_print $files_size_8)"
+echo "  >=1 GiB : $(hash_print $files_size_9)"
+
+exit 0

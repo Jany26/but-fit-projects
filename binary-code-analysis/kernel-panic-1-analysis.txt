@@ -1,0 +1,117 @@
+Študent: Ján Maťufka (xmatuf00@stud.fit.vutbr.cz), 2. projekt do predmetu IAN (2022)
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Najprv som si vypísal príkazom sys informácie o systéme, na ktorom sa kernel panic stala.
+(tieto informácie sa vypíšu aj vždy pri spustení crash utility).
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+crash> sys
+      KERNEL: /usr/lib/debug/lib/modules/4.18.0-348.12.2.el8_5.x86_64/vmlinux
+    DUMPFILE: vmcore_p2  [PARTIAL DUMP]
+        CPUS: 4
+        DATE: Wed Mar 23 10:02:26 EDT 2022
+      UPTIME: 04:50:50
+LOAD AVERAGE: 0.00, 0.00, 0.00
+       TASKS: 186
+    NODENAME: rhel8-student-temp
+     RELEASE: 4.18.0-348.12.2.el8_5.x86_64
+     VERSION: #1 SMP Mon Jan 17 07:06:06 EST 2022
+     MACHINE: x86_64  (2095 Mhz)
+      MEMORY: 2 GB
+       PANIC: "Kernel panic - not syncing: Out of memory: system-wide panic_on_oom is enabled"
+         PID: 2359
+     COMMAND: "stress"
+        TASK: ff38963f46e65ac0  [THREAD_INFO: ff38963f46e65ac0]
+         CPU: 0
+       STATE: TASK_RUNNING (PANIC)
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Dôležité informácie pochádzajú najmä z polí PANIC, MEMORY a PID.
+Z poľa PANIC vidíme, že problém nastal kvôli vyčerpaniu pamäte 
+(systém ma k dispozícii 2 GB pamäte RAM - položka MEMORY).
+Keďže bol nastavený príznak panic_on_oom, tak sa pri tomto stave vyvolal kernel panic.
+Inak by len kernel v momente nedostatku pamäte ukončil, 
+resp. "zabil" nejaký proces, aby si pamäť uvoľnil a tak predišiel pádu.
+
+Ďalej tam vidíme aj číslo procesu PID, ktorý pád kernelu spôsobil.
+Použitím príkazu bt skutočne vidieť, že kernel panic nastal kvôli výpadku stránky,
+ktorý vznikol v dôsledku zlyhanej alokácie.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+crash> bt
+PID: 2359   TASK: ff38963f46e65ac0  CPU: 0   COMMAND: "stress"
+ #0 [ff41a7a440acfa38] machine_kexec at ffffffff9e6635ce
+ #1 [ff41a7a440acfa90] __crash_kexec at ffffffff9e79d6bd
+ #2 [ff41a7a440acfb58] panic at ffffffff9e6eb227
+ #3 [ff41a7a440acfbd8] out_of_memory.cold.35 at ffffffff9e87e6f1
+ #4 [ff41a7a440acfc18] __alloc_pages_slowpath at ffffffff9e8d4825
+ #5 [ff41a7a440acfd10] __alloc_pages_nodemask at ffffffff9e8d4beb
+ #6 [ff41a7a440acfd70] alloc_pages_vma at ffffffff9e8ef414
+ #7 [ff41a7a440acfdb0] do_anonymous_page at ffffffff9e8b1077
+ #8 [ff41a7a440acfde8] __handle_mm_fault at ffffffff9e8b7336
+ #9 [ff41a7a440acfe98] handle_mm_fault at ffffffff9e8b742e
+#10 [ff41a7a440acfec0] __do_page_fault at ffffffff9e674f5d
+#11 [ff41a7a440acff20] do_page_fault at ffffffff9e675267
+#12 [ff41a7a440acff50] page_fault at ffffffff9f00111e
+    RIP: 000056525428d210  RSP: 00007ffe41cb9f40  RFLAGS: 00010206
+    RAX: 000000000841a000  RBX: 0000000000000000  RCX: 00007fb13e034010
+    RDX: 0000000000000000  RSI: 0000000010001000  RDI: 0000000000000000
+    RBP: 00007fb13e034010   R8: 00000000ffffffff   R9: 0000000000000000
+    R10: 0000000000000022  R11: 0000000000000246  R12: 0000000000001000
+    R13: 000056525428f004  R14: 0000000000000002  R15: 0000000010000000
+    ORIG_RAX: ffffffffffffffff  CS: 0033  SS: 002b
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Vieme teda, že proces zodpovedný za pád kernelu má PID 2359.
+(respektíve vieme použiť aj hexadecimálnu hodnotu ukazateľa na štruktúru task_struct,
+ktorá je v tomto prípade ff38963f46e65ac0)
+S príkazom ps si zistíme o tomto procese viac informácií.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+crash> ps 2359
+   PID    PPID  CPU       TASK        ST  %MEM     VSZ    RSS  COMM
+>  2359   2358   0  ff38963f46e65ac0  RU   6.5  270132 135372  stress
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Jedná sa o nejaký stress, ktorý využíval 6.5% celkovej pamäte (z dostupných 2 GB).
+6.5% pamäte ale nie je až tak veľa na to, aby vyvolal pád kernelu.
+Skúsime si teda zistiť informácie o všetkých procesoch.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+crash> ps
+   PID    PPID  CPU       TASK        ST  %MEM     VSZ    RSS  COMM
+...
+>   701      1   3  ff38963f467edac0  RU   0.1   89548   2980  systemd-journal
+...
+   2315      2   0  ff38963f71ba9e40  RU   0.0       0      0  [kworker/0:1]
+   2348   2287   1  ff38963f73d28000  IN   0.0    7984    104  stress
+   2349   2348   2  ff38963f46c00000  IN  25.0  532276 524388  stress
+   2350   2348   1  ff38963f48800000  IN  25.0  532276 524388  stress
+   2354      2   3  ff38963f74119e40  ID   0.0       0      0  [kworker/3:1]
+   2356      2   1  ff38963f7411dac0  ID   0.0       0      0  [kworker/1:0]
+   2358   2287   1  ff38963f73d29e40  IN   0.0    7984    104  stress
+>  2359   2358   0  ff38963f46e65ac0  RU   6.5  270132 135372  stress
+   2360   2358   2  ff38963f41920000  UN   4.1  270132  85008  stress
+>  2361   2358   2  ff38963f54a35ac0  RU   8.1  270132 170676  stress
+>  2362   2358   1  ff38963f419d5ac0  RU   7.9  270132 165616  stress
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Vidíme, že v momente pádu kernelu sa 3 z našich 4 CPU (jadrá procesora) venovali 
+procesom stress (CPU 0,1,2). Posledné CPU malo na starosti nejaké logovanie, čo pre nás nie je až tak podstatné.
+
+Čo je však ale zaujímavé, sú hodnoty %MEM, teda koľko pamäte jednotlivé procesy využívali.
+Je jasne vidieť, že inštancií procesu stress je viac, a dohromady si zabrali až 
+takmer 77% pamäte, čo už je kritické množstvo.
+
+V konečnom dôsledku sa dá z týchto zistených informácií konštatovať, že kernel padol
+kvôli vyčerpaniu fyzickej pamäte. Pamäť bola vyčerpaná pravdepodobne v dôsledku nejakého záťažového testovania.
+Keďže bol nastavený príznak panic_on_oom, tak sa v momente vyčerpania pamäte vyvolal kernel panic.
+
+Takýmto prípadom by sa dalo predísť napríklad fyzickým zväčšením pamäte RAM. 
+2 GB je na dnešnú dobu a dnešné požiadavky bežného užívateľa málo.
+Ďalším spôsobom je vypnúť panic_on_oom príznak, čo vlastne znamená povoliť kernelu 
+použiť tzv. OOM killer process, ktorý pri nedostatku pamäte prechádza bežiace procesy, 
+a snaží sa ich vypínať s cieľom uvoľniť pamäť.
+To sa dá spraviť napríklad takýmto príkazom (je potrebné mať root práva):
+
+$ echo 0 > /proc/sys/vm/panic_on_oom

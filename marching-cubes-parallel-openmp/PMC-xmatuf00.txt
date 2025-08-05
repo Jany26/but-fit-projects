@@ -1,0 +1,220 @@
+Architektury Výpočetních Systémů (AVS 2023)
+Projekt č. 2 (PMC)
+Login: xmatuf00
+
+===============================================================================
+Úloha 1: Paralelizace původního řešení
+===============================================================================
+
+1) Kterou ze smyček (viz zadání) je vhodnější paralelizovat a co způsobuje 
+   neefektivitu paralelizaci té druhé?
+
+Vhodnejšie bolo paralelizovať vonkajšiu smyčku (volanú v
+LoopMeshBuilder::marchCubes()). Neefektivita paralelizácie druhej smyčky
+(volanej v LoopMeshBuilder::evaluateFieldAt()) spočíva v nadbytočnej réžii
+spojenej s častým vytváraním vlákien a pod.
+
+
+2) Jaké plánování (rozdělení práce mezi vlákna) jste zvolili a proč? 
+   Jaký vliv má velikost "chunk" při dynamickém plánování (8, 16, 32, 64)?
+
+Zvolil som plánovanie dynamic, keďže dosahovalo dobré a konzistentné časy
+výpočtu. Zároveň vieme, že nie všetky iterácie cyklu budú trvať približne
+rovnako (čo vylučuje použitie schedule(static)).
+Ak sa vo funkcii LoopMeshBuilder::buildCube() zistí, že hodnota cubeIndex je 0
+alebo 255, tak výpočet končí, prípadne sa pre rôzne hodnoty cubeIndexu
+môže emitovať rôzny počet trojuholníkov. Ak teda mám lepšie poznatky o tom,
+ako dlho fungujú iterácie, schedule(dynamic) je cesta (zdroj: cvičenie 4).
+
+Zároveň som si prepočítal priemerné dĺžky výpočtu na compute node
+pre rôzne schedulery (spustil som to 8 krát).
+parametre: --builder loop --grid 128 -t 36 ../data/bun_zipper_res1.pts
+
+         | avgtime (ms) | mintime (ms) | maxtime (ms)
+auto     | 12405        | 12372        | 12480
+static   | 12440        | 12398        | 12503
+dynamic  | 12411        | 12386        | 12493
+guided   | 12397        | 12376        | 12435
+runtime  | 12473        | 12400        | 12589
+
+Medzi auto, static, dynamic, guided neboli zásadné rozdiely.
+Najrýchlejšie dokonca vyšiel guided. Iba runtime bol konzistentne pomalší.
+
+---
+
+Bolo zvolené dynamické plánovanie s veľkosťou chunksize 32.
+Avšak v porovnaní s ostatnými chunksize tam nie je výrazný rozdiel.
+Veľkosť chunk size som zvolil podľa rýchlosti a konzistencie dĺžky výpočtu.
+Chunksize 32 mal priemerne najkratší výpočet a najmenší rozsah dĺžok výpočtov.
+
+spustené 5x
+parametre: --builder loop --grid 128 -t 36 ../data/bun_zipper_res1.pts
+
+      | avgtime (ms) | mintime (ms) | maxtime (ms)
+8     | 12413        | 12380        | 12457
+16    | 12410        | 12386        | 12461
+32    | 12396        | 12381        | 12426
+64    | 12416        | 12391        | 12439
+
+
+3) Jakým způsobem zajišťujete ukládání trojúhelníků z několika vláken současně?
+
+Dovolením zapisovania v jeden moment iba jedným vláknom, čo sa dosiahlo
+pridaním #pragma omp critical do funkcie LoopMeshBuilder::emitTriangle().
+
+===============================================================================
+Úloha 2: Paralelní průchod stromem
+===============================================================================
+
+1) Stručně popište použití OpenMP tasků ve vašem řešení.
+
+Vo funkcii TreeMeshBuilder::marchCubes(), kde sa potom zavolá rekurzívna funkcia
+ocTreeDecompose(), sa nachádzajú 2 pragmy:
+
+#pragma omp parallel
+#pragma omp single
+
+Parallel označuje paralelnú oblasť (teda v podstate len zavolanie funkcie
+ocTreeDecompose()), a single označuje, že toto prvé zavolanie funkcie bude
+vykonané len 1 vláknom.
+
+Vo funkcii TreeMeshBuilder::ocTreeDecompose(), ktorá implementuje rekurzívne
+delenie priestoru a potrebné výpočty na urýchlenie, sa nachádzajú pragmy:
+
+#pragma omp task shared(totalTriangles) if(seqThreshold < newGridSize)
+#pragma omp atomic update
+#pragma omp taskwait
+
+Prvá pragma vytvára tasky, ktoré potom ďalej počítajú algoritmus
+v podpriestoroch (aj s vyhodnotením, či daný podpriestor má cenu analyzovať).
+Doplnok shared() nám označuje premennú, ktorá je zdieľaná naprieč vláknami,
+totalTriangles musí byť takto zdieľaná, inak by výpočet nebol konzistentný.
+Podmienka v klauze if je popísaná v otázke 2.2.
+
+Podobne ako pri loop implementácii, aj tu musíme mať vo funkcii emitTriangle():
+#pragma omp critical pre zabezpečenie konzistentnosti výsledku.
+
+2) Jaký vliv má na vaše řešení tzv. "cut-off"? Je vhodné vytvářet nový 
+   task pro každou krychli na nejnižší úrovni?
+
+V rámci môjho riešenia "cut-off" zabezpečuje hodnota premennej seqThreshold.
+V podstate sa jedná o veľkosť strany kocky, resp. mriežky (gridSize), pre ktorú
+sa už v podpriestoroch nebude výpočet ďalej paralelizovať,
+ale vykoná sa sekvenčne. Tento princíp umožňuje vyhnúť sa zbytočne vysokej
+réžii vlákien pre malé objemy výpočtov. Nemyslím si, že je vhodné vytvárať
+task aj pre krychle na najnižšej úrovni. To dokazujú aj výpočetné časy nižšie.
+(spustené pre -t 36 ../data/bun_zipper_res1.pts):
+
+seqThreshold   | 0      | 1      | 2      | 4      | 8      | 16     | 32
+CPU time       | 1052   | 996    | 1179   | 1153   | 1957   | 6029   | 18844
+
+
+3) Jakým způsobem zajišťujete ukládání trojúhelníků z několika vláken současně?
+
+Rovnako ako pri loop implementácii -- použitím #pragma omp critical vo funkcii
+TreeMeshBuilder::emitTriangle().
+
+
+===============================================================================
+Úloha 3: Grafy škálování všech řešení
+===============================================================================
+
+1) Stručně zhodnoťte efektivitu vytvořených řešení (na základě grafů ŠKÁLOVÁNÍ).
+
+input_scaling_weak.png:
+----------------------
+
+V OcTree pri viac vláknach rastie aj dĺžka výpočtu.
+V OpenMP Loop je skôr tendencia, že pri viac vláknach trvá výpočet kratšie.
+Avšak celkovo ale OcTree trvalo menej času v porovnaní s OpenMP Loop.
+OpenMP Loop avšak škáluje lepšie (grafy sú viac "vodorovné", čo je v súlade
+s Gustaffsonovým zákonom).
+
+input_scaling_strong.png:
+------------------------
+
+V OpenMP Loop je pekne vidieť, ako krásne klesá čas výpočtu s viacerými
+vláknami. Avšak pre 32 vlákien tam už nastane trochu nárast (pre menšie vstupy,
+pri vstupe 642 to nenastalo).
+Dá sa povedať, že odvtedy už je réžia vlákien tak vysoká, že začína spomaľovať
+výpočet. Najefektívnejšie bolo používanie 16 vlákien.
+
+V OcTree je celý graf posunutý trochu nižšie (implementácia je rýchlejšia),
+avšak správa sa ináč. Pre 32 vlákien už vidíme nárast doby výpočtu u všetkých
+vstupných veľkostí. Niekde ten nárast nastane už pri 16 vláknach.
+
+Celkovo ale OpenMP škáluje lepšie, avšak OcTree je rýchlejšie.
+
+grid_scaling.png:
+----------------
+
+Z grafu je vidieť, že od istého bodu pri veľkých mriežkach (veľkosť mriežky
+cca 2^12) je OcTree efektívnejšie ako OpenMP Loop. Ďalej vidíme, že dĺžka
+výpočtu je lineárne závislá od veľkosti mriežky.
+
+
+2) V jakém případě (v závislosti na počtu bodů ve vstupním souboru a velikosti 
+   mřížky) bude vaše řešení 1. úlohy neefektivní? (pokud takový případ existuje)
+
+Keď máme veľmi veľa vlákien a veľmi malý vstup.
+Réžia vlákien by výrazne prevažovala nad efektívnou dĺžkou výpočtu.
+
+
+3) Je (nebo není) stromový algoritmus efektivnější z pohledu slabého škálování 
+   vzhledem ke vstupu?
+
+Podľa mňa nie. Vypovedá o tom aj graf slabého škálovania. Podobný prípad ako
+v otázke 3.2.
+
+
+4) Jaký je rozdíl mezi silným a slabým škálováním?
+
+Silné škálovanie: zvýšime počet procesorov, objem práce ale nemeníme
+
+Silné škálovanie nám určuje, ako veľmi je možné urýchliť výpočet
+paralelizáciou (veľkosť problému, respektíve celkové množstvo práce je v tomto
+prípade fixné). Toto zrýchlenie je zhora ohraničené pomerom sekvenčnej práce
+v programe (tj. taká, ktorá sa nedá vykonať paralelne) -- doba výpočtu je zdola
+ohraničená práve dĺžkou trvania tejto sekvenčnej práce. Pridávaním procesorov
+sa znižuje efektivita paralelizácie. Silné škálovanie popisuje Amdahlov zákon.
+
+Slabé škálovanie: zvýšime počet procesorov, zároveň zvýšime objem práce
+
+Slabé škálovanie sa na to pozerá inak. Pridávaním ďalších procesorov nechceme
+zmenšiť dobu výpočtu, ale zväčšiť objem vykonanej práce. Tu to zrýchlenie bude
+lineárne rásť s pribúdajúcim počtom procesorov. Slabým škálovaním sa zaoberá
+Gustaffsonov zákon.
+
+===============================================================================
+Úloha 4: Analýza využití jader pomocí VTune
+================================================================================
+
+1) Jaké bylo průměrné využití jader pro všechny tři implementace s omezením na 
+   18 vláken? Na kolik procent byly využity?
+
+   ref:  2.8 %,  0.997  / 36
+   loop: 48.4 %, 17.428 / 36
+   tree: 45.1 %, 16.250 / 36
+
+
+2) Jaké bylo průměrné využití jader pro všechny tři implementace s využitím 
+   všech jader? Na kolik procent se podařilo využít obě CPU?
+   
+   ref:  2.8 %,  0.998  / 36
+   loop: 89.8 %, 32.325 / 36
+   tree: 67.0 %, 24.132 / 36
+
+Poznámka k 4.1 a 4.2 tieto hodnoty sú priamo prepísané z VTune bez úprav.
+
+
+3) Jaké jsou závěry z těchto měření?
+
+Použitie paralelizmu sa na daný problém určite hodí. 
+V oboch implementáciách sa dá pozorovať niekoľko desiatok násobné zrýchlenie.
+Loop implementácia využíva jadrá lepšie ako tree, ale trvá dlhšie.
+To je spôsobené tým, že tree implementácia vie skôr identifikovať podpriestory,
+ktoré môže celé preskočiť, 
+
+
+===============================================================================
+
