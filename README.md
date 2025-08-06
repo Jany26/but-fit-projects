@@ -92,6 +92,12 @@ Used Technologies: C, Shell, UNIX knowledge
 `directory-file-histogram`
 - Shell script that recursively analyzes a directory tree, counts files and directories, and generates a file size histogram (with optional normalized ASCII bar chart), ignoring files matching an optional regex. Supports human-readable output and handles unreadable files gracefully.
 
+`custom-protocol-dissector`
+- Dissector of a custom protocol in Lua, able to be plugged into WireShark, along with replicated client implementation based on the given server/client binaries.
+
+`simple-python-remote-downloader`
+- File downloader using TCP from a remote server, establishing server address using UDP, written in Python.
+
 `hash-table-implementation`
 - Implementation of the UNIX `tail` utility in C.
 - Program that counts word frequencies in the input text using a custom modular hash table library (`libhtab`) provided as both a static and shared version.
