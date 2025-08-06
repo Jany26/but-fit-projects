@@ -78,6 +78,8 @@ Related Courses:
 - [The C Programming Language](https://www.fit.vut.cz/study/course/IJC/)
 - [Operating Systems](https://www.fit.vut.cz/study/course/IOS/)
 - [Introduction to Programming Systems](https://www.fit.vut.cz/study/course/IZP/)
+- [Computer Communications and Networks](https://www.fit.vut.cz/study/course/IPK/)
+- [Network Applications and Network Administration](https://www.fit.vut.cz/study/course/ISA/)
 
 Used Technologies: C, Shell, UNIX knowledge
 
