@@ -8,6 +8,7 @@ Here is a mapping of each project (directory) to their topic.
 |`binary-code-analysis`                      | Low-level Projects            |
 |`bitvector-steganography`                   | Low-level Projects            |
 |`car-accidents-analysis`                    | Data Mining                   |
+|`custom-protocol-dissector`                 | Low-level Projects            |
 |`diabetic-data-analysis`                    | Data Mining                   |
 |`directory-file-histogram`                  | Low-level Projects            |
 |`geometric-variability-of-proteins`         | Biological Data Analysis      |
@@ -24,6 +25,7 @@ Here is a mapping of each project (directory) to their topic.
 |`pipeline-merge-sort`                       | Parallel Computation Projects |
 |`pymol-correlated-mutations`                | Biological Data Analysis      |
 |`semaphores`                                | Low-level Projects            |
+|`simple-python-remote-downloader`           | Low-level Projects            |
 |`triangular-maze-solver`                    | Low-level Projects            |
 
 What follows is a brief description of each project grouped by topic, related courses and used technologies.
@@ -81,7 +83,7 @@ Related Courses:
 - [Computer Communications and Networks](https://www.fit.vut.cz/study/course/IPK/)
 - [Network Applications and Network Administration](https://www.fit.vut.cz/study/course/ISA/)
 
-Used Technologies: C, Shell, UNIX knowledge
+Used Technologies: C/C++, Shell, UNIX knowledge, Python, Lua, WireShark
 
 `binary-code-analysis`
 - Simplified version of `readelf -l`, printing ELF program headers (segments) and listing the sections that belong to each segment. Uses the `libelf` and `gelf` APIs to parse and inspect ELF binaries, displaying segment types and permissions.
